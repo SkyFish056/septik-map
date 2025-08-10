@@ -1,95 +1,236 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-    <title>Карта дилеров</title>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Карта дилеров</title>
+    
+    <!-- Мета-теги для ВКонтакте -->
+    <meta property="og:title" content="Карта дилеров">
+    <meta property="og:description" content="Найдите официальных дилеров в вашем городе">
+    <meta property="og:image" content="https://skyfish056.github.io/septik-map/preview.jpg">
+    <meta property="og:url" content="https://skyfish056.github.io/septik-map/">
+    <meta property="vk:image" content="https://skyfish056.github.io/septik-map/preview.jpg">
+    
+    <!-- API Яндекс.Карт -->
     <script src="https://api-maps.yandex.ru/2.1/?apikey=888ae0cd-1515-4762-9738-a15768a83edf&lang=ru_RU"></script>
+    
     <style>
         html, body, #map {
             width: 100%;
             height: 100%;
             margin: 0;
             padding: 0;
-            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #city-filter {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            z-index: 999;
+            background: rgba(255,255,255,0.9);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        #city-select {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            min-width: 200px;
+        }
+        .vk-back-btn {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            z-index: 999;
+            background: rgba(255,255,255,0.9);
+            padding: 8px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-weight: bold;
+        }
+        .vk-back-btn:hover {
+            background: #f0f0f0;
         }
     </style>
 </head>
 <body>
+    <!-- Основной контейнер карты -->
     <div id="map"></div>
+    
+    <!-- Фильтр по городам -->
+    <div id="city-filter">
+        <select id="city-select">
+            <option value="">Все города</option>
+            <!-- Города загрузятся автоматически -->
+        </select>
+    </div>
+    
+    <!-- Кнопка "Назад" для ВК -->
+    <div class="vk-back-btn" id="backBtn" style="display:none;">
+        ← Назад
+    </div>
+
     <script>
-        // Функция для добавления меток на карту
+        // Проверка открытия в мобильном ВК
+        if(navigator.userAgent.includes('VK')) {
+            document.body.style.paddingTop = '56px';
+            document.getElementById('backBtn').style.display = 'block';
+        }
+
+        // Обработчик кнопки "Назад"
+        document.getElementById('backBtn').addEventListener('click', () => {
+            if(window.history.length > 1) {
+                history.back();
+            } else {
+                window.close();
+            }
+        });
+
+        // Основная функция инициализации карты
+        ymaps.ready(initMap);
+
+        async function initMap() {
+            try {
+                // Создаем карту
+                const map = new ymaps.Map('map', {
+                    center: [55.76, 37.64],
+                    zoom: 4,
+                    controls: ['zoomControl', 'searchControl']
+                });
+
+                // Загрузка данных с кешированием
+                const dealers = await loadDealers();
+                console.log('Загружено дилеров:', dealers.length);
+                
+                // Инициализация фильтра
+                initCityFilter(dealers, map);
+                
+                // Добавление меток на карту
+                addDealersToMap(map, dealers);
+
+            } catch (error) {
+                console.error('Ошибка инициализации:', error);
+                alert('Произошла ошибка при загрузке карты. Пожалуйста, попробуйте позже.');
+            }
+        }
+
+        // Функция загрузки данных с кешированием
+        async function loadDealers() {
+            const CACHE_TIME = 6 * 60 * 60 * 1000; // 6 часов кеширования
+            
+            // Проверяем кеш
+            const cachedData = localStorage.getItem('dealersCache');
+            const cacheTime = localStorage.getItem('dealersCacheTime');
+            
+            if (cachedData && cacheTime && (Date.now() - cacheTime < CACHE_TIME)) {
+                return JSON.parse(cachedData);
+            }
+            
+            // Загрузка свежих данных
+            const response = await fetch('https://skyfish056.github.io/septik-map/dealers.json?v=' + Date.now());
+            
+            if (!response.ok) {
+                throw new Error('Ошибка загрузки данных: ' + response.status);
+            }
+            
+            const data = await response.json();
+            
+            // Сохраняем в кеш
+            localStorage.setItem('dealersCache', JSON.stringify(data));
+            localStorage.setItem('dealersCacheTime', Date.now());
+            
+            return data;
+        }
+
+        // Инициализация фильтра по городам
+        function initCityFilter(dealers, map) {
+            const citySelect = document.getElementById('city-select');
+            
+            // Получаем уникальные города
+            const cities = [...new Set(dealers.map(d => d.city).filter(Boolean))];
+            cities.sort();
+            
+            // Заполняем select
+            cities.forEach(city => {
+                const option = document.createElement('option');
+                option.value = city;
+                option.textContent = city;
+                citySelect.appendChild(option);
+            });
+            
+            // Обработчик изменения фильтра
+            citySelect.addEventListener('change', function() {
+                const selectedCity = this.value;
+                const placemarks = map.geoObjects;
+                
+                if (!selectedCity) {
+                    // Показать все метки
+                    placemarks.each(placemark => {
+                        placemark.options.set('visible', true);
+                    });
+                } else {
+                    // Фильтрация по городу
+                    placemarks.each(placemark => {
+                        const city = placemark.properties.get('balloonContent').match(/Город:<\/b> (.*?)<br>/)[1];
+                        placemark.options.set('visible', city === selectedCity);
+                    });
+                }
+                
+                // Автомасштабирование
+                const visiblePlacemarks = placemarks.filter(placemark => placemark.options.get('visible'));
+                if (visiblePlacemarks.getLength() > 0) {
+                    map.setBounds(visiblePlacemarks.getBounds(), { checkZoomRange: true });
+                }
+            });
+        }
+
+        // Добавление меток на карту
         function addDealersToMap(map, dealers) {
-            // Создаем коллекцию меток
-            var objectManager = new ymaps.ObjectManager({
+            const objectManager = new ymaps.ObjectManager({
                 clusterize: true,
-                gridSize: 32,
+                gridSize: 64,
                 clusterDisableClickZoom: true
             });
             
-            // Преобразуем данные в формат для ObjectManager
-            var features = dealers.map(function(dealer) {
-                return {
-                    type: 'Feature',
-                    id: dealer.id,
-                    geometry: {
-                        type: 'Point',
-                        coordinates: dealer.coords
-                    },
-                    properties: {
-                        balloonContent: `
-                            <b>${dealer.name}</b><br>
-                            <b>Город:</b> ${dealer.city}<br>
-                            <b>Адрес:</b> ${dealer.address}<br>
-                            <b>Телефон:</b> <a href="tel:${dealer.phone}">${dealer.phone}</a><br>
-                            <b>Email:</b> <a href="mailto:${dealer.email}">${dealer.email}</a>
-                        `,
-                        clusterCaption: dealer.city,
-                        hintContent: dealer.name
-                    }
-                };
-            });
+            // Преобразование данных для ObjectManager
+            const features = dealers.map(dealer => ({
+                type: 'Feature',
+                id: dealer.id,
+                geometry: {
+                    type: 'Point',
+                    coordinates: dealer.coords
+                },
+                properties: {
+                    balloonContent: `
+                        <b>${dealer.name}</b><br>
+                        <b>Город:</b> ${dealer.city}<br>
+                        <b>Адрес:</b> ${dealer.address || 'Не указан'}<br>
+                        <b>Телефон:</b> <a href="tel:${dealer.phone}">${dealer.phone}</a><br>
+                        ${dealer.email ? `<b>Email:</b> <a href="mailto:${dealer.email}">${dealer.email}</a>` : ''}
+                    `,
+                    clusterCaption: dealer.city,
+                    hintContent: dealer.name
+                }
+            }));
             
-            // Добавляем данные в менеджер объектов
             objectManager.add({
                 type: 'FeatureCollection',
                 features: features
             });
             
-            // Добавляем менеджер объектов на карту
             map.geoObjects.add(objectManager);
             
-            // Масштабируем карту на область видимости меток
+            // Автомасштабирование
             if (features.length > 0) {
                 map.setBounds(objectManager.getBounds(), { checkZoomRange: true });
             }
         }
-
-        // Инициализация карты
-        ymaps.ready(function() {
-            var map = new ymaps.Map('map', {
-                center: [55.76, 37.64],
-                zoom: 4,
-                controls: ['zoomControl', 'searchControl']
-            });
-
-            // Загрузка данных дилеров
-            fetch('https://skyfish056.github.io/septik-map/dealers.json')
-                .then(function(response) {
-                    if (!response.ok) {
-                        throw new Error('Ошибка загрузки данных: ' + response.status);
-                    }
-                    return response.json();
-                })
-                .then(function(data) {
-                    console.log('Данные дилеров загружены:', data);
-                    addDealersToMap(map, data);
-                })
-                .catch(function(error) {
-                    console.error('Произошла ошибка:', error);
-                    alert('Не удалось загрузить данные дилеров. Пожалуйста, попробуйте позже.');
-                });
-        });
     </script>
 </body>
 </html>
