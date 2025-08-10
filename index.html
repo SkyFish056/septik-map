@@ -4,7 +4,7 @@
     <title>Карта дилеров</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://api-maps.yandex.ru/2.1/?apikey=888ae0cd-1515-4762-9738-a15768a83edf&lang=ru_RU" type="text/javascript"></script>
+    <script src="https://api-maps.yandex.ru/2.1/?apikey=888ae0cd-1515-4762-9738-a15768a83edf&lang=ru_RU"></script>
     <style>
         html, body, #map {
             width: 100%;
@@ -18,17 +18,25 @@
 <body>
     <div id="map"></div>
     <script>
-        ///// НАЧАЛО ИЗМЕНЕНИЙ /////
+        // Функция для добавления меток на карту
         function addDealersToMap(map, dealers) {
-            // Удаляем старые метки (если есть)
-            map.geoObjects.removeAll();
+            // Создаем коллекцию меток
+            var objectManager = new ymaps.ObjectManager({
+                clusterize: true,
+                gridSize: 32,
+                clusterDisableClickZoom: true
+            });
             
-            // Добавляем каждого дилера на карту
-            dealers.forEach(dealer => {
-                const placemark = new ymaps.Placemark(
-                    dealer.coords,
-                    {
-                        hintContent: dealer.name,
+            // Преобразуем данные в формат для ObjectManager
+            var features = dealers.map(function(dealer) {
+                return {
+                    type: 'Feature',
+                    id: dealer.id,
+                    geometry: {
+                        type: 'Point',
+                        coordinates: dealer.coords
+                    },
+                    properties: {
                         balloonContent: `
                             <b>${dealer.name}</b><br>
                             <b>Город:</b> ${dealer.city}<br>
@@ -36,52 +44,52 @@
                             <b>Телефон:</b> <a href="tel:${dealer.phone}">${dealer.phone}</a><br>
                             <b>Email:</b> <a href="mailto:${dealer.email}">${dealer.email}</a>
                         `,
-                        iconCaption: dealer.city
-                    },
-                    {
-                        preset: 'islands#blueDotIcon'
+                        clusterCaption: dealer.city,
+                        hintContent: dealer.name
                     }
-                );
-                map.geoObjects.add(placemark);
+                };
+            });
+            
+            // Добавляем данные в менеджер объектов
+            objectManager.add({
+                type: 'FeatureCollection',
+                features: features
+            });
+            
+            // Добавляем менеджер объектов на карту
+            map.geoObjects.add(objectManager);
+            
+            // Масштабируем карту на область видимости меток
+            if (features.length > 0) {
+                map.setBounds(objectManager.getBounds(), { checkZoomRange: true });
+            }
+        }
+
+        // Инициализация карты
+        ymaps.ready(function() {
+            var map = new ymaps.Map('map', {
+                center: [55.76, 37.64],
+                zoom: 4,
+                controls: ['zoomControl', 'searchControl']
             });
 
-            // Автоматически подгоняем карту под метки
-            if (dealers.length > 0) {
-                map.setBounds(map.geoObjects.getBounds());
-            }
-        }
-
-        function init() {
-            try {
-                const map = new ymaps.Map('map', {
-                    center: [55.76, 37.64], // Москва
-                    zoom: 4,
-                    controls: ['searchControl', 'zoomControl']
+            // Загрузка данных дилеров
+            fetch('https://skyfish056.github.io/septik-map/dealers.json')
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Ошибка загрузки данных: ' + response.status);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    console.log('Данные дилеров загружены:', data);
+                    addDealersToMap(map, data);
+                })
+                .catch(function(error) {
+                    console.error('Произошла ошибка:', error);
+                    alert('Не удалось загрузить данные дилеров. Пожалуйста, попробуйте позже.');
                 });
-
-                // Загружаем данные дилеров
-                fetch('https://skyfish056.github.io/septik-map/dealers.json')
-                    .then(response => {
-                        if (!response.ok) throw new Error('Ошибка загрузки данных');
-                        return response.json();
-                    })
-                    .then(dealers => {
-                        console.log('Дилеры загружены:', dealers); // Для отладки
-                        addDealersToMap(map, dealers);
-                    })
-                    .catch(error => {
-                        console.error('Ошибка:', error);
-                        alert('Не удалось загрузить дилеров. Проверьте консоль (F12).');
-                    });
-
-            } catch (error) {
-                console.error('Произошла ошибка:', error);
-                alert('Произошла ошибка при загрузке карты. Пожалуйста, обновите страницу.');
-            }
-        }
-        ///// КОНЕЦ ИЗМЕНЕНИЙ /////
-        
-        ymaps.ready(init);
+        });
     </script>
 </body>
 </html>
