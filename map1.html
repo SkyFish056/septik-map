@@ -60,7 +60,7 @@
                 });
 
                 // Загружаем данные дилеров
-                fetch('dealers.json')
+                fetchfetch('https://skyfish056.github.io/septik-map/dealers.json')
                     .then(response => {
                         if (!response.ok) throw new Error('Ошибка загрузки данных');
                         return response.json();
