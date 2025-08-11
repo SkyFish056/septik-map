@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Карта дилеров</title>
     
-    <!-- Обязательный VK Bridge -->
+    <!-- VK Bridge -->
     <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
     
     <style>
@@ -20,10 +20,12 @@
             overflow: hidden;
             font-family: -apple-system, system-ui, sans-serif;
             position: relative;
+            background: #f5f5f5;
         }
-        #map {
+        #map-container {
             width: 100%;
             height: 100%;
+            position: relative;
         }
         #loader {
             position: absolute;
@@ -38,6 +40,23 @@
             z-index: 1000;
             flex-direction: column;
             gap: 15px;
+            text-align: center;
+            padding: 20px;
+        }
+        .error {
+            color: #e53935;
+            font-weight: 500;
+            margin-top: 15px;
+        }
+        .retry-btn {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background: #1976d2;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
         }
         #city-filter {
             position: absolute;
@@ -49,6 +68,7 @@
             border-radius: 10px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.2);
             backdrop-filter: blur(5px);
+            display: none;
         }
         #city-select {
             padding: 10px 15px;
@@ -74,95 +94,122 @@
             border: none;
             cursor: pointer;
             backdrop-filter: blur(5px);
-        }
-        .error {
-            color: #ff3333;
-            text-align: center;
-            max-width: 300px;
-            line-height: 1.5;
+            display: none;
         }
     </style>
 </head>
 <body>
     <div id="app">
         <div id="loader">
-            <h3>Загрузка карты...</h3>
-            <div id="loader-status">Инициализация приложения</div>
+            <h3>Загрузка карты дилеров</h3>
+            <div id="loader-status">Инициализация приложения...</div>
         </div>
         
-        <div id="map"></div>
-        
-        <div id="city-filter" style="display: none">
-            <select id="city-select">
-                <option value="">Все города</option>
-            </select>
+        <div id="map-container" style="display: none">
+            <div id="map" style="width:100%;height:100%"></div>
+            <div id="city-filter">
+                <select id="city-select">
+                    <option value="">Все города</option>
+                </select>
+            </div>
+            <button class="back-btn" id="backBtn">
+                ← Назад
+            </button>
         </div>
-        
-        <button class="back-btn" id="backBtn" style="display: none">
-            ← Назад
-        </button>
     </div>
 
     <script>
-        // ================ ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ================
-        let ymapsLoaded = false;
+        // Глобальные переменные состояния
         let vkInitialized = false;
+        let ymapsLoaded = false;
         let mapInstance = null;
         
-        // ================ ОСНОВНАЯ ИНИЦИАЛИЗАЦИЯ ================
-        document.addEventListener('DOMContentLoaded', async () => {
+        // Основная функция инициализации
+        async function initializeApp() {
             const loaderStatus = document.getElementById('loader-status');
             
             try {
                 // 1. Инициализация VK Bridge (если в VK)
                 if (typeof vkBridge !== 'undefined') {
-                    loaderStatus.textContent = 'Инициализация VK Bridge...';
-                    await vkBridge.send('VKWebAppInit');
-                    await vkBridge.send('VKWebAppEnableSwipeBack');
-                    
-                    // Показываем кнопку "Назад"
-                    document.getElementById('backBtn').style.display = 'block';
+                    loaderStatus.textContent = 'Подключение к ВКонтакте...';
+                    await initVKBridge();
+                    document.getElementById('backBtn').style.display = 'flex';
                     vkInitialized = true;
                 }
                 
-                // 2. Загрузка API Яндекс.Карт
-                loaderStatus.textContent = 'Загрузка Яндекс.Карт...';
-                await loadYandexMaps();
-                
-                // 3. Загрузка данных дилеров
-                loaderStatus.textContent = 'Загрузка данных...';
+                // 2. Загрузка данных дилеров
+                loaderStatus.textContent = 'Загрузка данных дилеров...';
                 const dealers = await loadDealers();
                 
-                // 4. Инициализация карты
+                // 3. Загрузка Яндекс.Карт
+                loaderStatus.textContent = 'Загрузка карт...';
+                await loadYandexMaps();
+                
+                // 4. Создание карты
                 loaderStatus.textContent = 'Создание карты...';
                 initMap(dealers);
                 
-                // 5. Скрываем лоадер
+                // 5. Показываем карту
                 document.getElementById('loader').style.display = 'none';
+                document.getElementById('map-container').style.display = 'block';
                 document.getElementById('city-filter').style.display = 'block';
                 
             } catch (error) {
-                console.error('Fatal error:', error);
-                loaderStatus.innerHTML = `<div class="error">Ошибка: ${error.message}</div>`;
+                console.error('Ошибка инициализации:', error);
+                showError(error.message || 'Неизвестная ошибка');
+            }
+        }
+
+        // Инициализация VK Bridge
+        async function initVKBridge() {
+            try {
+                await vkBridge.send('VKWebAppInit');
+                await vkBridge.send('VKWebAppEnableSwipeBack');
+                return true;
+            } catch (error) {
+                console.error('Ошибка VK Bridge:', error);
+                throw new Error('Ошибка подключения к ВКонтакте');
+            }
+        }
+
+        // Загрузка данных дилеров
+        async function loadDealers() {
+            try {
+                // Пробуем загрузить напрямую
+                const response = await fetch('https://skyfish056.github.io/septik-map/dealers.json?t=' + Date.now());
                 
-                if (vkInitialized) {
-                    await vkBridge.send('VKWebAppReportError', {
-                        error_type: 'init_failed',
-                        error_message: error.message
-                    });
+                if (!response.ok) {
+                    throw new Error(`Ошибка ${response.status}`);
+                }
+                
+                return await response.json();
+            } catch (error) {
+                console.error('Ошибка загрузки данных:', error);
+                
+                // Пробуем через CORS-прокси
+                try {
+                    const proxyResponse = await fetch(
+                        `https://api.allorigins.win/raw?url=${encodeURIComponent('https://skyfish056.github.io/septik-map/dealers.json')}`
+                    );
+                    
+                    if (!proxyResponse.ok) {
+                        throw new Error('Ошибка загрузки через прокси');
+                    }
+                    
+                    return await proxyResponse.json();
+                } catch (proxyError) {
+                    console.error('Ошибка прокси:', proxyError);
+                    throw new Error('Не удалось загрузить данные');
                 }
             }
-        });
+        }
 
-        // ================ ЗАГРУЗКА ЯНДЕКС.КАРТ ================
+        // Загрузка API Яндекс.Карт
         function loadYandexMaps() {
             return new Promise((resolve, reject) => {
-                // Проверяем, возможно API уже загружено
+                // Проверяем, может быть API уже загружено
                 if (window.ymaps) {
-                    ymaps.ready(() => {
-                        ymapsLoaded = true;
-                        resolve();
-                    });
+                    ymaps.ready(() => resolve());
                     return;
                 }
                 
@@ -170,45 +217,39 @@
                 const script = document.createElement('script');
                 script.src = 'https://api-maps.yandex.ru/2.1/?apikey=888ae0cd-1515-4762-9738-a15768a83edf&lang=ru_RU';
                 
+                // Обработчики загрузки
                 script.onload = () => {
+                    // Яндекс.Карты требуют вызова ymaps.ready()
                     ymaps.ready(() => {
                         ymapsLoaded = true;
                         resolve();
                     });
                 };
                 
-                script.onerror = (err) => {
+                script.onerror = () => {
                     reject(new Error('Не удалось загрузить Яндекс.Карты'));
                 };
                 
+                // Добавляем скрипт на страницу
                 document.head.appendChild(script);
+                
+                // Таймаут на случай блокировки
+                setTimeout(() => {
+                    if (!window.ymaps) {
+                        reject(new Error('Таймаут загрузки Яндекс.Карт'));
+                    }
+                }, 10000);
             });
         }
 
-        // ================ ЗАГРУЗКА ДАННЫХ ДИЛЕРОВ ================
-        async function loadDealers() {
-            try {
-                const response = await fetch('https://skyfish056.github.io/septik-map/dealers.json?t=' + Date.now());
-                
-                if (!response.ok) {
-                    throw new Error(`Ошибка ${response.status}: ${response.statusText}`);
-                }
-                
-                return await response.json();
-            } catch (error) {
-                console.error('Dealers load error:', error);
-                throw new Error('Не удалось загрузить данные дилеров');
-            }
-        }
-
-        // ================ ИНИЦИАЛИЗАЦИЯ КАРТЫ ================
+        // Инициализация карты
         function initMap(dealers) {
             try {
                 // Создаем карту
                 mapInstance = new ymaps.Map('map', {
                     center: [55.76, 37.64],
                     zoom: 4,
-                    controls: ['zoomControl', 'typeSelector']
+                    controls: ['zoomControl']
                 });
                 
                 // Добавляем метки
@@ -221,12 +262,12 @@
                 document.getElementById('backBtn').addEventListener('click', handleBackButton);
                 
             } catch (error) {
-                console.error('Map init error:', error);
-                throw new Error('Ошибка создания карты');
+                console.error('Ошибка создания карты:', error);
+                throw new Error('Ошибка инициализации карты');
             }
         }
 
-        // ================ ДОБАВЛЕНИЕ МЕТОК НА КАРТУ ================
+        // Добавление меток на карту
         function addDealersToMap(dealers) {
             const objectManager = new ymaps.ObjectManager({
                 clusterize: true,
@@ -266,11 +307,9 @@
             }
         }
 
-        // ================ ФИЛЬТР ПО ГОРОДАМ ================
+        // Инициализация фильтра городов
         function initCityFilter(dealers) {
             const select = document.getElementById('city-select');
-            
-            // Очищаем и добавляем опции
             select.innerHTML = '<option value="">Все города</option>';
             
             // Получаем уникальные города
@@ -287,11 +326,11 @@
             
             // Обработчик изменения
             select.addEventListener('change', () => {
-                const city = select.value;
-                filterDealersByCity(city);
+                filterDealersByCity(select.value);
             });
         }
         
+        // Фильтрация по городу
         function filterDealersByCity(city) {
             const allObjects = mapInstance.geoObjects;
             
@@ -314,7 +353,7 @@
             }
         }
 
-        // ================ ОБРАБОТКА КНОПКИ "НАЗАД" ================
+        // Обработчик кнопки "Назад"
         function handleBackButton() {
             if (vkInitialized) {
                 vkBridge.send('VKWebAppClose', { status: 'success' });
@@ -324,6 +363,27 @@
                 window.close();
             }
         }
+
+        // Показать сообщение об ошибке
+        function showError(message) {
+            const loader = document.getElementById('loader');
+            loader.innerHTML = `
+                <h3>Ошибка загрузки</h3>
+                <div class="error">${message}</div>
+                <button class="retry-btn" id="retryBtn">Попробовать снова</button>
+            `;
+            
+            document.getElementById('retryBtn').addEventListener('click', () => {
+                document.getElementById('loader').innerHTML = `
+                    <h3>Загрузка карты дилеров</h3>
+                    <div id="loader-status">Повторная попытка...</div>
+                `;
+                setTimeout(initializeApp, 1000);
+            });
+        }
+
+        // Запуск приложения после загрузки DOM
+        document.addEventListener('DOMContentLoaded', initializeApp);
     </script>
 </body>
 </html>
