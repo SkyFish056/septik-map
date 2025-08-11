@@ -15,47 +15,60 @@
     <!-- API Яндекс.Карт -->
     <script src="https://api-maps.yandex.ru/2.1/?apikey=888ae0cd-1515-4762-9738-a15768a83edf&lang=ru_RU"></script>
     
+    <!-- VK Bridge (обязательно для Mini Apps) -->
+    <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+    
     <style>
         html, body, #map {
             width: 100%;
             height: 100%;
             margin: 0;
             padding: 0;
-            font-family: Arial, sans-serif;
+            font-family: -apple-system, system-ui, sans-serif;
+            overflow: hidden;
         }
         #city-filter {
             position: absolute;
             top: 15px;
             right: 15px;
             z-index: 999;
-            background: rgba(255,255,255,0.9);
-            padding: 10px;
-            border-radius: 8px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            background: rgba(255,255,255,0.95);
+            padding: 12px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            backdrop-filter: blur(4px);
         }
         #city-select {
-            padding: 8px 12px;
-            border-radius: 4px;
-            border: 1px solid #ddd;
-            min-width: 200px;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            min-width: 220px;
+            font-size: 16px;
+            background: #fff;
         }
         .vk-back-btn {
             position: fixed;
             top: 15px;
             left: 15px;
             z-index: 999;
-            background: rgba(255,255,255,0.9);
-            padding: 8px 12px;
-            border-radius: 20px;
+            background: rgba(255,255,255,0.95);
+            padding: 10px 16px;
+            border-radius: 24px;
             cursor: pointer;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             display: flex;
             align-items: center;
-            gap: 5px;
-            font-weight: bold;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 16px;
+            backdrop-filter: blur(4px);
+            border: none;
         }
         .vk-back-btn:hover {
-            background: #f0f0f0;
+            background: #f8f8f8;
+        }
+        .vk-back-btn.hidden {
+            display: none;
         }
     </style>
 </head>
@@ -72,41 +85,79 @@
     </div>
     
     <!-- Кнопка "Назад" для ВК -->
-    <div class="vk-back-btn" id="backBtn" style="display:none;">
+    <button class="vk-back-btn hidden" id="backBtn">
         ← Назад
-    </div>
+    </button>
 
     <script>
-        // Проверка открытия в мобильном ВК
-        if(navigator.userAgent.includes('VK')) {
-            document.body.style.paddingTop = '56px';
-            document.getElementById('backBtn').style.display = 'block';
-        }
+        // ======================= VK MINI APPS ИНИЦИАЛИЗАЦИЯ =======================
+        // Обязательная инициализация VK Bridge
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Проверяем, открыто ли в VK Mini Apps
+            const isVK = typeof vkBridge !== 'undefined';
+            
+            if (isVK) {
+                // 1. Инициализация приложения (ОБЯЗАТЕЛЬНЫЙ ШАГ)
+                await vkBridge.send('VKWebAppInit');
+                
+                // 2. Включаем свайп назад (рекомендуется)
+                await vkBridge.send('VKWebAppEnableSwipeBack');
+                
+                // 3. Настраиваем интерфейс под VK
+                document.body.classList.add('vk-app');
+                document.getElementById('backBtn').classList.remove('hidden');
+                
+                // 4. Получаем параметры запуска (если нужно)
+                const launchParams = await vkBridge.send('VKWebAppGetLaunchParams');
+                console.log('Параметры запуска:', launchParams);
+                
+                // 5. Устанавливаем тему приложения
+                const appearance = await vkBridge.send('VKWebAppGetAppearance');
+                setTheme(appearance);
+                
+                // Следим за сменой темы
+                vkBridge.subscribe((e) => {
+                    if (e.detail.type === 'VKWebAppUpdateConfig') {
+                        setTheme(e.detail.data.scheme);
+                    }
+                });
+            }
+            
+            // Инициализируем карту после загрузки VK
+            ymaps.ready(() => initMap(isVK));
+        });
 
         // Обработчик кнопки "Назад"
-        document.getElementById('backBtn').addEventListener('click', () => {
-            if(window.history.length > 1) {
+        document.getElementById('backBtn').addEventListener('click', async () => {
+            if (typeof vkBridge !== 'undefined') {
+                // Закрываем приложение
+                await vkBridge.send('VKWebAppClose', { status: 'success' });
+            } else if (window.history.length > 1) {
                 history.back();
             } else {
                 window.close();
             }
         });
 
-        // Основная функция инициализации карты
-        ymaps.ready(initMap);
+        // Установка темы оформления
+        function setTheme(scheme) {
+            const isDark = scheme === 'space_gray' || scheme === 'vk_dark';
+            document.documentElement.style.setProperty('--bg-color', isDark ? '#19191A' : '#FFFFFF');
+            document.documentElement.style.setProperty('--text-color', isDark ? '#E1E3E6' : '#19191A');
+        }
 
-        async function initMap() {
+        // ======================= ОСНОВНОЙ КОД КАРТЫ =======================
+        async function initMap(isVKApp) {
             try {
                 // Создаем карту
                 const map = new ymaps.Map('map', {
                     center: [55.76, 37.64],
                     zoom: 4,
-                    controls: ['zoomControl', 'searchControl']
+                    controls: ['zoomControl', isVKApp ? '' : 'searchControl'].filter(Boolean)
                 });
 
-                // Загрузка данных с кешированием
+                // Загрузка данных
                 const dealers = await loadDealers();
-                console.log('Загружено дилеров:', dealers.length);
                 
                 // Инициализация фильтра
                 initCityFilter(dealers, map);
@@ -116,36 +167,37 @@
 
             } catch (error) {
                 console.error('Ошибка инициализации:', error);
+                
+                // Отправка ошибки в VK
+                if (typeof vkBridge !== 'undefined') {
+                    await vkBridge.send('VKWebAppReportError', {
+                        error_type: 'map_init_error',
+                        error_message: error.message
+                    });
+                }
+                
                 alert('Произошла ошибка при загрузке карты. Пожалуйста, попробуйте позже.');
             }
         }
 
         // Функция загрузки данных с кешированием
         async function loadDealers() {
-            const CACHE_TIME = 6 * 60 * 60 * 1000; // 6 часов кеширования
-            
-            // Проверяем кеш
-            const cachedData = localStorage.getItem('dealersCache');
-            const cacheTime = localStorage.getItem('dealersCacheTime');
-            
-            if (cachedData && cacheTime && (Date.now() - cacheTime < CACHE_TIME)) {
-                return JSON.parse(cachedData);
+            try {
+                const response = await fetch('https://skyfish056.github.io/septik-map/dealers.json?v=' + Date.now());
+                
+                if (!response.ok) {
+                    throw new Error(`Ошибка HTTP: ${response.status}`);
+                }
+                
+                return await response.json();
+            } catch (error) {
+                // Пробуем загрузить из кеша, если есть
+                const cachedData = localStorage.getItem('dealersCache');
+                if (cachedData) {
+                    return JSON.parse(cachedData);
+                }
+                throw error;
             }
-            
-            // Загрузка свежих данных
-            const response = await fetch('https://skyfish056.github.io/septik-map/dealers.json?v=' + Date.now());
-            
-            if (!response.ok) {
-                throw new Error('Ошибка загрузки данных: ' + response.status);
-            }
-            
-            const data = await response.json();
-            
-            // Сохраняем в кеш
-            localStorage.setItem('dealersCache', JSON.stringify(data));
-            localStorage.setItem('dealersCacheTime', Date.now());
-            
-            return data;
         }
 
         // Инициализация фильтра по городам
@@ -170,14 +222,10 @@
                 const placemarks = map.geoObjects;
                 
                 if (!selectedCity) {
-                    // Показать все метки
-                    placemarks.each(placemark => {
-                        placemark.options.set('visible', true);
-                    });
+                    placemarks.each(placemark => placemark.options.set('visible', true));
                 } else {
-                    // Фильтрация по городу
                     placemarks.each(placemark => {
-                        const city = placemark.properties.get('balloonContent').match(/Город:<\/b> (.*?)<br>/)[1];
+                        const city = placemark.properties.get('balloonContent').match(/Город:<\/b> (.*?)<br>/)?.[1];
                         placemark.options.set('visible', city === selectedCity);
                     });
                 }
@@ -195,10 +243,11 @@
             const objectManager = new ymaps.ObjectManager({
                 clusterize: true,
                 gridSize: 64,
-                clusterDisableClickZoom: true
+                clusterDisableClickZoom: true,
+                clusterIconLayout: 'default#pieChart'
             });
             
-            // Преобразование данных для ObjectManager
+            // Преобразование данных
             const features = dealers.map(dealer => ({
                 type: 'Feature',
                 id: dealer.id,
@@ -207,12 +256,14 @@
                     coordinates: dealer.coords
                 },
                 properties: {
-                    balloonContent: `
-                        <b>${dealer.name}</b><br>
-                        <b>Город:</b> ${dealer.city}<br>
-                        <b>Адрес:</b> ${dealer.address || 'Не указан'}<br>
-                        <b>Телефон:</b> <a href="tel:${dealer.phone}">${dealer.phone}</a><br>
-                        ${dealer.email ? `<b>Email:</b> <a href="mailto:${dealer.email}">${dealer.email}</a>` : ''}
+                    balloonContentHeader: dealer.name,
+                    balloonContentBody: `
+                        <div style="margin: 8px 0">
+                            <b>Город:</b> ${dealer.city}<br>
+                            <b>Адрес:</b> ${dealer.address || 'Не указан'}<br>
+                            <b>Телефон:</b> <a href="tel:${dealer.phone}" style="color: #07f">${dealer.phone}</a>
+                        </div>
+                        ${dealer.email ? `<div><b>Email:</b> <a href="mailto:${dealer.email}" style="color: #07f">${dealer.email}</a></div>` : ''}
                     `,
                     clusterCaption: dealer.city,
                     hintContent: dealer.name
